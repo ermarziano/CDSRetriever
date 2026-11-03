@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CDSRetriever": {
+      "commandName": "Project",
+      "commandLineArgs": "35 \"ITR20602_CDS_001\""
+    }
+  }
+}
