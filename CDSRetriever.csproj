@@ -10,7 +10,7 @@
     <PackageReference Include="System.Drawing.Common" Version="8.0.15" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\JSON Creator\JsonCreator.csproj" />
+    <ProjectReference Include="..\Json Creator\JsonCreator.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Properties\Resources.Designer.cs">

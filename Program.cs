@@ -1,19 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Drawing.Imaging;
+﻿using CDSRetriever.Properties;
+using JsonCreator;
 using Newtonsoft.Json;
 using RestSharp;
 using RestSharp.Authenticators;
 using RestSharp.Serializers.NewtonsoftJson;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Diagnostics;
-using System.Resources;
-using CDSRetriever.Properties;
-using System.Threading;
-using JsonCreator;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Linq;
+using System.Resources;
+using System.Threading;
+using static CDSRetriever.Program;
 
 namespace CDSRetriever
 {
@@ -30,19 +31,59 @@ namespace CDSRetriever
         }
         public static void Main(string[] args)
         {
-            Console.Write("What do you need? Direct download (1) or search (2)? ");
+            Console.Write("What do you need? Search by Catalog (1) or by Date (2)? ");
             string choice = Console.ReadLine();
-            if (choice == "1")
+            if (choice.Equals("1") || choice.ToLower().Equals("catalog"))
             {
-                Console.Write("Insert the CDS Id: ");
-                string id = Console.ReadLine();
-                var client = new RestClient("http://ide.ent.bhicorp.com/CDS/api/");
-                client.UseNewtonsoftJson();
-                client.Authenticator = new HttpBasicAuthenticator("CDS", "9&P$7Qu7=&DnLUJh");
-                var request = new RestRequest("/CDS/" + id);
-                var response = client.Get(request);
-                List<Item> item = JsonConvert.DeserializeObject<List<Item>>(response.Content);
-                DownloadCDS(item[0]);
+                while (true) {
+                    List<Item> OggettiTrovati = new();
+                    Console.Write("Insert the catalog name (search in last ten days): ");
+                    string name = Console.ReadLine();
+                    var client = new RestClient("http://ide.ent.bhicorp.com/CDS/api/");
+                    client.UseNewtonsoftJson();
+                    client.Authenticator = new HttpBasicAuthenticator("CDS", "9&P$7Qu7=&DnLUJh");
+                    var dateToSearch = DateTime.Today.AddDays(-10);
+                    var request = new RestRequest("CDSes/" + dateToSearch.ToString("MM-dd-yy"), DataFormat.Json);
+                    var response = client.Get(request);
+                    Console.WriteLine("Searching in CDS Assistant...");
+                    OggettiTrovati = JsonConvert.DeserializeObject<List<Item>>(response.Content);
+                    OggettiTrovati = OggettiTrovati.Where(i=>i.Name.StartsWith(name, StringComparison.InvariantCultureIgnoreCase)).ToList();
+                    int totalFound = OggettiTrovati.Count;
+                    OggettiTrovati.RemoveAll(IsAlreadyDownloaded);
+                    Console.WriteLine(string.Format("Found {0} items ({1} already downloaded, hidden)", totalFound, totalFound - OggettiTrovati.Count));
+                    while (OggettiTrovati.Count > 0)
+                    {
+                        int count = 1;
+                        foreach (Item i in OggettiTrovati)
+                        {
+                            Console.WriteLine($"Item {count}: Name - {i.Name}, Id - {i.Id}");
+                            count++;
+                        }
+                        Console.Write($"List has {totalFound} items ({totalFound - OggettiTrovati.Count} already downloaded). Which one do you want? (type 1,2,3 etc): ");
+                        int itemId = int.Parse(Console.ReadLine());
+                        Item item = OggettiTrovati[itemId - 1];
+                        DownloadCDS(item);
+                        OggettiTrovati.Remove(item);
+                        if (OggettiTrovati.Count == 0)
+                        {
+                            Console.WriteLine("No more items in the list.");
+                            break;
+                        }
+                        Console.WriteLine("Cds Downloaded. Request another one inside the list?: (y)es or (n)o");
+                        if (Console.ReadLine().ToLower().Equals("n"))
+                        {
+                            break;
+                        }
+                    }
+                    Console.WriteLine("Search for another catalog?: (y)es or (n)o");
+                    String cont = Console.ReadLine();
+                    if (cont.ToLower().Equals("n"))
+                    {
+                        //MoveAllFiles();
+                        CreateJson();
+                        break;
+                    }
+                }
             }
             else
             {
@@ -86,16 +127,41 @@ namespace CDSRetriever
                             break;
                         }
                     }
-                    Console.Write("Cds Downloaded. Do Another search?: (y)es or (n)o");
+                    Console.WriteLine("Do Another search?: (y)es or (n)o");
                     String cont = Console.ReadLine();
                     if (cont.ToLower().Equals("n"))
                     {
+                        //MoveAllFiles();
+                        CreateJson();
                         break;
                     }
                 }
             }
+            Console.WriteLine("Press any key to close the window");
+            Console.ReadKey();
         }
 
+        /// <summary>
+        /// Move all folders that contains "_CDS_" on the name in the input folder
+        /// </summary>
+        private static void MoveAllFiles()
+        {
+            var list = Directory.EnumerateDirectories(Resources.DownloadFolder, "*_CDS_*");
+            foreach (var folder in list)
+            {
+                Directory.Move(folder, Resources.DownloadFolder + @"Input\" + Path.GetFileNameWithoutExtension(folder));
+            }
+        }
+
+        private static void CreateJson()
+        {
+            var list = Directory.EnumerateDirectories(Resources.DownloadFolder, "*_CDS_*");
+            foreach (var folder in list)
+            {
+                string itemName = Path.GetFileNameWithoutExtension(folder);
+                new Runner(folder + @"\" + itemName + ".json").Run();
+            }
+        }
 
         /// <summary>
         /// A CDS counts as downloaded only if list.json exists, since it is written as the last step of DownloadCDS.
@@ -109,22 +175,37 @@ namespace CDSRetriever
         {
             string itemInfo = item.Name.Replace("_CDS", "");
             string directory = Resources.DownloadFolder + item.Name + @"\";
-            bool foundDS = Directory.EnumerateFiles(directory, itemInfo + "_DS_*").Any();
-
-
-            File.Exists(Resources.DownloadFolder + "_DS_");
-            bool foundSDS = File.Exists(Resources.DownloadFolder + "_SDS_");
+            bool foundDS = Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_DS_*").Any();
+            bool foundSDS = Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_SDS_*").Any();
             if (!foundDS && !foundSDS)
             {
                 status = "No files found for " + itemInfo;
                 return false;
             }
+            string fileDS = Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_DS_*").First();
+            string fileSDS = Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_SDS_*").First();
             if (foundDS && foundSDS)
             {
-                File.Move(Re)
+                Directory.Move(Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_DS_*").First(), directory+Path.GetFileName(fileDS));
+                Directory.Move(Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_SDS_*").First(), directory + Path.GetFileName(fileSDS));
                 status = $"Both DS and SDS found for {itemInfo}, copied them to folder {directory}";
-                return true
+                return true;
             }
+            if (foundDS)
+            {
+                Directory.Move(Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_DS_*").First(), directory + Path.GetFileName(fileDS));
+                status = $"DS found for {itemInfo}, copied it to folder {directory}";
+                return true;
+            }
+            if (foundSDS)
+            {
+                Directory.Move(Directory.EnumerateFiles(Resources.DownloadFolder, itemInfo + "_SDS_*").First(), directory + Path.GetFileName(fileSDS));
+                status = $"SDS found for {itemInfo}, copied it to folder {directory}";
+                return true;
+            }
+            status = "Ok";
+            return false;
+        }
 
 
         public static void DownloadCDS(Item item)
@@ -182,9 +263,15 @@ namespace CDSRetriever
             Console.WriteLine("Download CDS Documents");
             //create custom bat file to run in the other server
             CreateBat(item, directory);
-            Console.WriteLine("Put manually the files in directory " + directory);
-            Console.WriteLine("Type DONE when you're done");
-            string cont = Console.ReadLine();
+            string status;
+            bool foundSomething = FindFilesFromCDS(item, out status);
+            Console.WriteLine(status);
+            if (!foundSomething)
+            {
+                Console.WriteLine("Put manually the files in directory " + directory);
+                Console.WriteLine("Type DONE when you're done");
+                string cont = Console.ReadLine();
+            }
             RenameFiles(Files, directoryList, directory);
             File.WriteAllText(directory + "list.json", JsonConvert.SerializeObject(Files));
         }
